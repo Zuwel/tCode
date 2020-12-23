@@ -4,6 +4,7 @@
 ---
 
 ## TODO
+- &cross; - Actually functioning?
 - &cross; - Flow control (label, goto, if, ifnt)
 - &cross; - Rednet communication / control
 - &cross; - Auto resume / run state saving
@@ -36,7 +37,7 @@
     - label (string) - a label which references a line position within the tCode file
     - goto (string) - skips the execution back to a specified label within the tCode file
     - if (value) (expression) (value) (command) (args) checks if the comparison is true; if so, it will run the command specified. [if commands can be chained]
-    - ifnt (value) (expression) (value) (command) (args) checks if the comparison is not true; if so, it will run the command specified. [ifnt commands can be chained]
+    - ifnot (value) (expression) (value) (command) (args) checks if the comparison is not true; if so, it will run the command specified. [ifnt commands can be chained]
     - var (set/unset/add/sub/mult/div) (name) (value) sets user variable which can be referenced in tcode with "#<name>"
 - ### Rednet Commands
     - TODO

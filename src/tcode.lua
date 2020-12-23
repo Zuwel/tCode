@@ -1,44 +1,12 @@
 --[[tCode Interpreter and Execution Script]]--
 --{made by Zuwel}--
 --
--- tCode (turtle-code) format:
--- - HEADER:
--- - - format (string) - the file format, which must read "tCode" for to ensure interpreter compatibility
--- - - version (string) - the tCode version number, used for ensuring interpreter compatibility
--- - - usegps (bool) - if the turtle should use gps
--- - - lowfuelreturn (bool) - if the turtle should automatically return home if it only has the fuel required (plus margin) to return home
--- - - returnmethod (integer) - the method in which the turtle returns home, either by traceback (0), direct path (1), or rise and return (2)
--- - - fuelmargin (integer) - amount of additional fuel saved in addition to the minimum required to return home
--- - - digfilter (array) - array of blocks to consider digging (+) or not (-) ("(+/-) stone") [Warning: Could result in an automatic failure]
--- - -   If any inclusion (+) filters are specified, it is assumed that the turtle will only dig the specified blocks [Warning: Use digfilter inclusions with caution]
--- - - suckfilter (array) - array of blocks/items to consider sucking (+) or not (-) ("(+/-) diamond")
--- - -   If any inclusion (+) filters are specified, it is assumed that the turtle will only suck the specified blocks/items
--- - - _ - a simple marker indicating that the header section has been read to completion
--- - COMMANDS:
--- - - move (f/u/d/b) <value> - moves the turtle either forward (f), up (u), down (d), back (b), with an optional command repeat parameter
--- - - turn (l/r) <value> - turns the turtle either left (l) or right (r), with an optional command repeat parameter
--- - - dig (false/true) - enables (true) or disables (false) the turtles ability to dig
--- - - suck (false/true) - enables (false) or disables (false) the turtles ability to suck
--- - - tooldir (f/u/d) - specifies the relative direction in which the turtle digs and sucks, forward (f), up (u), down (d)
--- - - dump <string> - dumps all items, excluding valid fuel sources, or optionally, all of a specified item in the turtles inventory
--- - - home - turtle attempts to navigate home, either by tracing back its path ()
--- - - pos (x), (y), (z) - automatically tracks back to the specified position using the fastest route, using gps coordinates if possible or relative position.
--- - - look (r) - turns the turtle to face the specified rotation, using gps heading if possible or relative rotation.
--- - - label (string) - a label which references a line position within the tCode file
--- - - goto (string) - skips the execution back to a specified label within the tCode file
--- - - if (value) (expression) (value) (command) (args) -- checks if the comparison is true; if so, it will run the command specified. [if commands can be chained]
--- - - ifnt (value) (expression) (value) (command) (args) -- checks if the comparison is not true; if so, it will run the command specified. [ifnt commands can be chained]
--- - - var (set/unset/add/sub/mult/div) (name) (value) -- sets user variable which can be referenced in tcode with "#<name>"
--- - REDNET COMMANDS:
--- - - TODO
-
--- ARGS: (* is required)
--- - *filePath (string) - tcode text file path to read from
--- - hostName (string) - host name of the wirelessly controlling computer
+-- GitHub (Source Code and Usage): https://github.com/Zuwel/tCode
+--
 args = {...}
 
 local format = "tcode"
-local version = "1.0"
+local version = 1.0
 
 local tCodeFile = nil
 local tCode = {}
@@ -74,17 +42,18 @@ local Types = {
 -- position & orientation
 local loc = {
     home = vector.new(0,0,0),
-    position = Vector.new(0,0,0),
+    position = vector.new(0,0,0),
     rot = Direction.north, --The tracked rotation of the turtle relative to its orientation upon program start
     xRotOffset = 0, --The offset from the tracked rotation that is assumed to point towards the positive x (requires GPS network)
     getOffsetRot = function(self) return math.fmod(self.rot+self.xRotOffset,4) end
 }
 
 -- both safetys enabled by default
-local digEnabled = false
-local suckEnabled = false
-local tooldir = "d"
-
+local tool = {
+    digEnabled = false,
+    suckEnabled = false,
+    tooldir = "d"
+}
 
 -- Program relevant variables
 local vars = {
@@ -99,9 +68,9 @@ local vars = {
         posy = function() return Types.number, loc.position.y end,
         posz = function() return Types.number, loc.position.z end,
         dir = function() return Types.number, loc.getOffsetRot() end,
-        dig = function() return Types.boolean, digEnabled end,
-        suck = function() return Types.boolean, suckEnabled end,
-    }
+        dig = function() return Types.boolean, tool.digEnabled end,
+        suck = function() return Types.boolean, tool.suckEnabled end,
+    },
     -- User vars - mutable variables within the tcode
     user = {}
 }
@@ -122,14 +91,13 @@ end
 
 -- Checks if file exists and loads it
 function loadFile()
-    if fs.exists(vars.filePath) then
-        tCodeFile = fs.open(vars.filePath,"r")
+    if fs.find(vars.args.filePath) then
+        tCodeFile = fs.open(vars.args.filePath,"r")
         local line = tCodeFile.readLine()
         while line ~= nil do
             table.insert(tCode,line)
             line = tCodeFile.readLine()
         end
-        print("length: "..#tCode)
         tCodeFile.close()
         return true
     else
@@ -276,11 +244,6 @@ function move(dir)
     dig(tooldir)
 end
 
-function error(msg)
-    print("Error ("..tCodeLine.."): "..msg)
-    return false
-end
-
 function splitTokens(line)
     if line == nil then return {} end
     local key = nil
@@ -297,15 +260,35 @@ function parseValue(val)
     local v = nil
     if string.sub(val,1,1) == "#" then
         local name = string.sub(val,2,string.len(val))
-        v = vars.user[name]
-        assert(v ~= nil, "Not a valid user variable.")
+        if vars.user[name] ~= nil then
+            t = vars.user[name].t
+            v = vars.user[name].v
+        else
+            error("Not a valid user variable.")
+        end
     elseif string.sub(val,1,1) == "@" then
         local name = string.sub(val,2,string.len(val))
-        v = vars.exposed[name]
-        assert(value ~= nil, "Not a valid exposed variable.")
+        if vars.exposed[name] ~= nil then
+            local et, ev = vars.exposed[name]()
+            t = et
+            v = ev
+        else
+            error("Not a valid exposed variable.")
+        end
     else
-        if str:match
-        v = val
+        if val == "true" then
+            t = Types.boolean
+            v = true
+        elseif val == "false" then
+            t = Types.boolean
+            v = false
+        elseif tonumber(val) ~= nil then
+            t = Types.number
+            v = tonumber(val)
+        else
+            t = Types.text
+            v = val
+        end
     end
     return t, v
 end
@@ -327,15 +310,14 @@ local state = nil -- The active state of the turtle
 local prevState = nil -- The previously active state
 
 -- Used to change the active state, running the associated scripts with either
-local function changeState(newState,args)
-    startArgs = args.start or {}
-    stopArgs = args.stop or {}
-    if newState == nil then
-        error("")
-        exit()
-    end
+local function changeState(newState,...)
+    local startArgs = {}
+    local stopArgs = {}
+    if args.start ~= nil then startArgs = args.start end
+    if args.stop ~= nil then stopArgs = args.stop end
+    if newState == nil then return false end
     if states[newState] == nil then return false end
-    if not state == nil then
+    if state ~= nil then
         -- set the prev state and run its stop function
         prevState = state
         if states[prevState].stop ~= nil then -- if a stop function is available, run it and feed in the arguments
@@ -344,14 +326,23 @@ local function changeState(newState,args)
     end
     -- set the new state and run its start function
     state = newState
-    print(assert(states[state].start(startArgs),"No associated start function with "..state))
+    if states[state].start == nil then
+        error("No start function for '"..state.."' state.")
+        return false
+    end
+    states[state].start(startArgs)
     return true
 end
 
 local function parseLine(line)
+    if line == nil then
+        print("Can't parse a nil string.")
+        return true
+    end
     local key, tokens = splitTokens(line)
     if states[state].commands[key] == nil then
-        return error("No command named '"..key.."' in active state."))
+        print("No command named '"..key.."' in '"..state.."' state.")
+        return true
     end
     local success = states[state].commands[key](tokens)
     return success
@@ -359,12 +350,12 @@ end
 
 states.starting.commands.format = function(tokens)
     local t, v = parseValue(tokens[1])
-    if t ~= Types.number then
-        error("Invalid value '"..tokens[1].."'!")
+    if t ~= Types.text then
+        error("Invalid value type '"..tokens[1].."'!")
         return true
     end
-    if v ~= version then
-        error("Incompatible version!")
+    if v ~= format then
+        error("Incompatible format!")
         changeState("failed")
         return false
     end
@@ -379,11 +370,7 @@ states.starting.commands.version = function(tokens)
     end
     if v ~= version then
         error("Incompatible version!")
-        changeState("failed", { start = {
-            --Failure info goes here
-        }, stop = {
-            "run" = false
-        }})
+        changeState("failed", { start = {}, stop = { run = false }})
         return false
     end
     return true
@@ -402,7 +389,7 @@ end
 states.starting.commands.lowfuelreturn = function(tokens)
     local t, v = parseValue(tokens[1])
     if t ~= Types.boolean then
-        print("Error: Invalid value '"..tokens[1].."'!")
+        error("Invalid value '"..tokens[1].."'!")
         return true
     end
     lowfuelreturn = v
@@ -415,7 +402,7 @@ states.starting.commands.returnmethod = function(tokens)
         error("Invalid value '"..tokens[1].."'!")
         return true
     end
-    returnmethod = math.floor(math.max(0,math.min(v,2))
+    returnmethod = math.floor(math.max(0,math.min(v,2)))
     return true
 end
 
@@ -425,12 +412,60 @@ states.starting.commands.fuelmargin = function(tokens)
         error("Invalid value '"..tokens[1].."'!")
         return true
     end
-    fuelmargin = math.max(0,math.min(v,turtle.getFuelLimit()))
+    fuelmargin = math.floor(math.max(0,math.min(v,9999)))
+    return true
+end
+
+states.starting.commands.digfilter = function(tokens)
+    tCodeLine = tCodeLine + 1 -- increment line
+    local line = tCode[tCodeLine]
+    if line == nil then return false end
+    local key, tokens = splitTokens(line)
+    if not key == "+" or not key == "-" then return true end
+    while key == "+" or key == "-" do
+        if key == "+" then
+            digonlyincluded = true
+            digfilter[tokens[1]] = true
+        elseif key == "-" then
+            digfilter[tokens[1]] = false
+        end
+        tCodeLine = tCodeLine + 1
+        line = tCode[tCodeLine]
+        if line == nil then break end
+        local k, t = splitTokens(line)
+        key = k
+        tokens = t
+    end
+    tCodeLine = tCodeLine - 1
+    return true
+end
+
+states.starting.commands.suckfilter = function(tokens)
+    tCodeLine = tCodeLine + 1 -- increment line
+    local line = tCode[tCodeLine]
+    if line == nil then return false end
+    local key, tokens = splitTokens(line)
+    if not key == "+" or not key == "-" then return true end
+    while key == "+" or key == "-" do
+        if key == "+" then
+            suckonlyincluded = true
+            suckfilter[tokens[1]] = true
+        elseif key == "-" then
+            suckfilter[tokens[1]] = false
+        end
+        tCodeLine = tCodeLine + 1
+        line = tCode[tCodeLine]
+        if line == nil then break end
+        local k, t = splitTokens(line)
+        key = k
+        tokens = t
+    end
+    tCodeLine = tCodeLine - 1
     return true
 end
 
 states.starting.commands._ = function(tokens)
-    print("Finished reading file header!")
+    tCodeLine = tCodeLine + 1
     changeState("running")
 end
 
@@ -444,15 +479,22 @@ states.starting.start = function(args)
     --Read and set the args appropriately
     readArgs()
 
-    print("Loading tCode file \""..vars.filePath.."\"...")
+    print("Loading tCode file \""..vars.args.filePath.."\"...")
     if not loadFile() then
-        print("Error: Failed to load file!")
-        exit()
+        error("Failed to load file!")
+        changeState("failed")
     end
 
-    readHeader()
-    
-    print(tCodeLine)
+    tCodeLine = 1 -- Start from the top
+
+    -- Keep iterating through the header until the parser returns false (from header end or critical error)
+    while parseLine(tCode[tCodeLine]) and state=="starting" do
+        tCodeLine = tCodeLine + 1
+    end
+
+end
+
+states.starting.stop = function(args)
 
     if usegps then
         local gpsPos, gpsHeading = gpsLocate()
@@ -460,80 +502,22 @@ states.starting.start = function(args)
         loc.xRotOffset = fmod(2-gpsHeading,4)
     end
 
-    tCodeLine = 1 -- Start from the top
+    print("Finished reading file header!")
+
+end
+
+states.running.start = function(args)
 
     -- Keep iterating through the header until the parser returns false (from header end or critical error)
-    while parseLine(tCode[tCodeLine]) do
+    while parseLine(tCode[tCodeLine]) and state=="running" do
         tCodeLine = tCodeLine + 1
+        if tCodeLine > #tCode then changeState("completed") break end
     end
 
 end
 
-states.start.stop = function(args)
-
-    
-
-end
-
-local function states.start.execute(line)
-
-    tCodeLine = tCodeLine + 1
-    if tCodeLine > #tCode then 
-        running = false
-        return
-    end
-    local line = tCode[tCodeLine] -- read next line
-    print(line)
-    local tokens = splitTokens(line) -- split line into individual tokens
-
-    if #tokens < 1 then readHeader() end
-
-    local key = tokens[1] -- retrieve the key token
-    local values = {}
-    for i=2, #tokens do
-        table.insert(values, tokens[i])
-    end
-
-    if filter ~= nil then
-        if key == "+" then
-            if filter == "dig" then
-                digfilter[values[1]] = true
-                digonlyincluded = true
-                readHeader(filter)
-            elseif filter == "suck" then
-                suckfilter[values[1]] = true
-                suckonlyincluded = true
-                readHeader(filter)
-            else
-                print("Error: Invalid header filter '"..filter.."'!")
-                readHeader(filter)
-                return
-            end
-        elseif key == "-" then
-            if filter == "dig" then
-                digfilter[values[1]] = false
-                readHeader(filter)
-            elseif filter == "suck" then
-                suckfilter[values[1]] = false
-                readHeader(filter)
-            else
-                print("Error: Invalid header filter '"..filter.."'!")
-                readHeader(filter)
-                return
-            end
-        end
-    end
-
-    if key == "digfilter" then
-        readHeader("dig")
-    elseif key == "suckfilter" then
-        readHeader("suck")
-    else
-        readHeader()
-    end
-end
-
-local function states.running.execute(line)
+-- Turn all this into individual state command functions, this old garbage is gross.
+--[[ local function states.running.execute(line)
     
     local tokens = splitTokens(line) -- split line into individual tokens
 
@@ -596,6 +580,14 @@ local function states.running.execute(line)
 
     return
 
+end ]]
+
+states.failed.start = function(args)
+    print("Failed")
+end
+
+states.completed.start = function(args)
+    print("Completed")
 end
 
 -- Start the program
