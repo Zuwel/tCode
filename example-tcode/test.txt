@@ -1,18 +1,11 @@
 format tcode
 version 1.0
 usegps false
-lowfuelreturn true
-returnmethod 0
-fuelmargin 20
-digfilter
-- minecraft:oak_planks
-suckfilter
-- minecraft:cobblestone
-_
-dig true
-suck true
+~
+dig false
+suck false
+
 label loop
-move f 10
-move d
-turn l 2
-ifnot @posy <= 5 goto loop
+move forward 10
+turn left
+goto loop

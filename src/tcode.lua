@@ -22,6 +22,9 @@ local digonlyincluded = false -- true if there are any include filters in the di
 local suckfilter = {}
 local suckonlyincluded = false -- true if there are any include filters in the suck filter table
 
+-- Constants
+local FUELSLOT = 1
+local FREESLOT = 16
 
 -- Direction enumerator
 local Direction = {
@@ -31,12 +34,28 @@ local Direction = {
     west = 4
 }
 
+-- Movement enumerator
+local Movement = {
+    forward = 1,
+    up = 2,
+    down = 3,
+    back = 4
+}
+
+-- Rotation enumerator
+local Rotation = {
+    left = 1,
+    right = 2
+}
+
 -- Value types and associated functions
 local Types = {
     number = 1,
     boolean = 2,
     text = 3,
     direction = 4,
+    movement = 5,
+    rotation = 6
 }
 
 -- position & orientation
@@ -45,7 +64,7 @@ local loc = {
     position = vector.new(0,0,0),
     rot = Direction.north, --The tracked rotation of the turtle relative to its orientation upon program start
     xRotOffset = 0, --The offset from the tracked rotation that is assumed to point towards the positive x (requires GPS network)
-    getOffsetRot = function(self) return math.fmod(self.rot+self.xRotOffset,4) end
+    getOffsetRot = function(loc) return math.fmod(loc.rot+loc.xRotOffset,4) end
 }
 
 -- both safetys enabled by default
@@ -62,6 +81,7 @@ local vars = {
         filePath = args[1],
         host = ""
     },
+    labels = {},
     -- Exposed vars - accessible within the tcode
     exposed = {
         posx = function() return Types.number, loc.position.x end,
@@ -72,7 +92,8 @@ local vars = {
         suck = function() return Types.boolean, tool.suckEnabled end,
     },
     -- User vars - mutable variables within the tcode
-    user = {}
+    user = {},
+    startLine = 1 -- This should be the first line of the instruction set (after the file header)
 }
 
 
@@ -123,20 +144,16 @@ function gpsLocate()
     return loc1, ((heading.x + math.abs(heading.x) * 2) + (heading.z + math.abs(heading.z) * 3))
 end
 
-function getOffsetRot()
-    
-end
-
 -- dig function w/ suck filtering
 function dig(dir)
 
-    local function tryDig(trySuck)
+--[[     local function tryDig(trySuck)
         local success = false
-        if dir == "f" then
+        if dir == Movement.forward then
             success = turtle.dig()
-        elseif dir == "u" then
+        elseif dir == Movement.up then
             success = turtle.digUp()
-        elseif dir == "d" then
+        elseif dir == Movement.down then
             success = turtle.digDown()
         end
         if success then
@@ -145,19 +162,23 @@ function dig(dir)
         else
             return false
         end
-    end
+    end ]]
 
     local success, data = nil
-    if dir == "f" then
+    if dir == Movement.forward then
         success, data = turtle.inspect()
-    elseif dir == "u" then
+        return turtle.dig()
+    elseif dir == Movement.up then
         success, data = turtle.inspectUp()
-    elseif dir == "d" then
+        return turtle.digUp()
+    elseif dir == Movement.down then
         success, data = turtle.inspectDown()
-    else
-        return false
+        return turtle.digDown()
     end
-    local trySuck = not suckonlyincluded
+    
+    return false
+
+    --[[ local trySuck = not suckonlyincluded
     if success then
         for k, v in pairs(digfilter) do
             if data.name == k then
@@ -174,17 +195,16 @@ function dig(dir)
         if not digonlyincluded then
             return tryDig()
         end
-    end
-    return false
+    end ]]
 end
 
 -- suck function
 function suck(dir)
-    if dir == "f" then
+    if dir == Movement.forward then
         return turtle.suck()
-    elseif dir == "u" then
+    elseif dir == Movement.up then
         return turtle.suckUp()
-    elseif dir == "d" then
+    elseif dir == Movement.down then
         return turtle.suckDown()
     end
     return false
@@ -193,55 +213,54 @@ end
 
 -- turn the turtle and update the 
 function turn(dir)
-    if dir == "l" then
+    if dir == Rotation.left then
         turtle.turnLeft()
-        rot = math.fmod(rot - 1, 3)
+        loc.rot = math.fmod(loc.rot - 1, 3)
         return true
-    elseif dir == "r" then
+    elseif dir == Rotation.right then
         turtle.turnRight()
-        rot = math.fmod(rot + 1, 3)
+        loc.rot = math.fmod(loc.rot + 1, 3)
         return true
-    else
-        return false
     end
+    return false
 end
 
 -- turtle move function
 function move(dir)
     local function calcMovement(f,u)
-        local xMove = (getOffsetRot() - 2) * (getOffsetRot() % 2)
-        local zMove = (getOffsetRot() - 3) * ((getOffsetRot() + 1) % 2)
+        local xMove = (loc.getOffsetRot(loc) - 2) * (loc.getOffsetRot(loc) % 2)
+        local zMove = (loc.getOffsetRot(loc) - 3) * ((loc.getOffsetRot(loc) + 1) % 2)
         return vector.new(xMove*f, u, zMove*f)
     end
 
-    if dir == "f" then
+    if dir == Movement.forward then
         if turtle.forward() then
-            position = position + calcMovement(1,0)
-        elseif dig() then
-            return true
+            loc.position = loc.position + calcMovement(1,0)
+        elseif dig(dir) then
+            return move(dir)
         end
-    elseif dir == "u" then
+    elseif dir == Movement.up then
         if turtle.up() then
-            position = position + calcMovement(0,1)
-        elseif dig() then
-            return true
+            loc.position = loc.position + calcMovement(0,1)
+        elseif dig(dir) then
+            return move(dir)
         end
-    elseif dir == "b" then
+    elseif dir == Movement.back then
         if turtle.back() then
-            position = position + calcMovement(-1,0)
+            loc.position = loc.position + calcMovement(-1,0)
         else
             return false
         end
-    elseif dir == "d" then
+    elseif dir == Movement.down then
         if turtle.down() then
-            position = position + calcMovement(0,1)
-        elseif dig() then
-            return true
+            loc.position = loc.position + calcMovement(0,-1)
+        elseif dig(dir) then
+            return move(dir)
         end
     else
         return false
     end
-    dig(tooldir)
+    if tool.digEnabled then dig(tool.tooldir) end
 end
 
 function splitTokens(line)
@@ -255,6 +274,7 @@ function splitTokens(line)
     return key, tokens
 end
 
+-- The super duper, incredible value parser.
 function parseValue(val)
     local t = nil
     local v = nil
@@ -264,7 +284,7 @@ function parseValue(val)
             t = vars.user[name].t
             v = vars.user[name].v
         else
-            error("Not a valid user variable.")
+            printError("Not a valid user variable.")
         end
     elseif string.sub(val,1,1) == "@" then
         local name = string.sub(val,2,string.len(val))
@@ -273,7 +293,7 @@ function parseValue(val)
             t = et
             v = ev
         else
-            error("Not a valid exposed variable.")
+            printError("Not a valid exposed variable.")
         end
     else
         if val == "true" then
@@ -285,6 +305,15 @@ function parseValue(val)
         elseif tonumber(val) ~= nil then
             t = Types.number
             v = tonumber(val)
+        elseif string.lower(val) == "north" or string.lower(val) == "south" or string.lower(val) == "east" or string.lower(val) == "west" then
+            t = Types.direction
+            v = Direction[string.lower(val)]
+        elseif string.lower(val) == "forward" or string.lower(val) == "up" or string.lower(val) == "down" or string.lower(val) == "back" then
+            t = Types.movement
+            v = Movement[string.lower(val)]
+        elseif string.lower(val) == "left" or string.lower(val) == "right" then
+            t = Types.rotation
+            v = Rotation[string.lower(val)]
         else
             t = Types.text
             v = val
@@ -293,14 +322,12 @@ function parseValue(val)
     return t, v
 end
 
-local labels = {}
-
 -- States contain the variables and functions for each run state.
 local states = {
     starting = {name = "starting", commands = {}},
     running = {name = "running", commands = {}},
     paused = {name = "paused", commands = {}},
-    gohome = {name = "gohome", commands = {}},
+    topos = {name = "topos", commands = {}},
     nofuel = {name = "nofuel", commands = {}},
     failed = {name = "failed", commands = {}},
     completed = {name = "completed", commands = {}},
@@ -335,7 +362,7 @@ local function changeState(newState,...)
 end
 
 local function parseLine(line)
-    if line == nil then
+    if line == nil or line == "" then
         print("Can't parse a nil string.")
         return true
     end
@@ -348,7 +375,34 @@ local function parseLine(line)
     return success
 end
 
-states.starting.commands.format = function(tokens)
+states.starting.start = function(args)
+
+    --Clear console
+    term.clear()
+    term.setCursorPos(1,1)
+    print("[tCode v"..version.." by Zuwel]\n")
+
+    --Read and set the args appropriately
+    readArgs()
+    
+    -- Need to add argument checking!!!
+
+    print("Loading tCode file \""..vars.args.filePath.."\"...")
+    if not loadFile() then
+        error("Failed to load file!")
+        changeState("failed")
+    end
+
+    tCodeLine = 1 -- Start from the top
+
+    -- Keep iterating through the header until the parser returns false (from header end or critical error)
+    while parseLine(tCode[tCodeLine]) and state=="starting" do
+        tCodeLine = tCodeLine + 1
+    end
+
+end
+
+states.starting.commands["format"] = function(tokens)
     local t, v = parseValue(tokens[1])
     if t ~= Types.text then
         error("Invalid value type '"..tokens[1].."'!")
@@ -362,7 +416,7 @@ states.starting.commands.format = function(tokens)
     return true
 end
 
-states.starting.commands.version = function(tokens)
+states.starting.commands["version"] = function(tokens)
     local t, v = parseValue(tokens[1])
     if t ~= Types.number then
         error("Invalid value '"..tokens[1].."'!")
@@ -376,7 +430,7 @@ states.starting.commands.version = function(tokens)
     return true
 end
 
-states.starting.commands.usegps = function(tokens)
+states.starting.commands["usegps"] = function(tokens)
     local t, v = parseValue(tokens[1])
     if t ~= Types.boolean then
         print("Error: Invalid value '"..tokens[1].."'!")
@@ -386,37 +440,302 @@ states.starting.commands.usegps = function(tokens)
     return true
 end
 
-states.starting.commands.lowfuelreturn = function(tokens)
-    local t, v = parseValue(tokens[1])
-    if t ~= Types.boolean then
-        error("Invalid value '"..tokens[1].."'!")
-        return true
+states.starting.commands["~"] = function(tokens)
+    vars.startLine = tCodeLine
+    tCodeLine = tCodeLine + 1
+    changeState("running")
+end
+
+states.starting.stop = function(args)
+
+    if usegps then
+        local gpsPos, gpsHeading = gpsLocate()
+        loc.position = gpsPos
+        loc.xRotOffset = fmod(2-gpsHeading,4)
     end
-    lowfuelreturn = v
+
+    print("Finished reading file header!")
+
+end
+
+
+
+states.running.start = function(args)
+
+    print(state)
+
+    -- Keep iterating through the header until the parser returns false (from header end or critical error)
+    while parseLine(tCode[tCodeLine]) and state=="running" do
+        --print(tCode[tCodeLine])
+        tCodeLine = tCodeLine + 1
+        if tCodeLine > #tCode then changeState("completed") break end
+    end
+
+end
+
+states.running.commands["move"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.movement then
+        local rep = 1
+        if tokens[2] ~= nil then
+            local rt, rv = parseValue(tokens[2])
+            if rt ~= Types.number or rv < 1 then
+                printError("Invalid repeat value.")
+            else
+                rep = rv
+            end
+        end
+        for i=1, rep, 1 do
+            move(v)
+        end
+    else
+        printError("Invalid value type.")
+    end
     return true
 end
 
-states.starting.commands.returnmethod = function(tokens)
+states.running.commands["turn"] = function(tokens)
     local t, v = parseValue(tokens[1])
-    if t ~= Types.number then
-        error("Invalid value '"..tokens[1].."'!")
-        return true
+    if t == Types.rotation then
+        local rep = 1
+        if tokens[2] ~= nil then
+            local rt, rv = parseValue(tokens[2])
+            if rt ~= Types.number or rv < 1 then
+                printError("Invalid repeat value.")
+            else
+                rep = rv
+            end
+        end
+        for i=1, rep, 1 do
+            turn(v)
+        end
+    else
+        printError("Invalid value type.")
     end
-    returnmethod = math.floor(math.max(0,math.min(v,2)))
     return true
 end
 
-states.starting.commands.fuelmargin = function(tokens)
+-- This one will be revised a lot...
+states.running.commands["place"] = function(tokens)
+    local dt, dv = parseValue(tokens[1]) -- Direction value
+    local bt, bv = parseValue(tokens[2]) -- Block value
+    -- Fill this in at some point!
+end
+
+states.running.commands["dig"] = function(tokens)
     local t, v = parseValue(tokens[1])
-    if t ~= Types.number then
-        error("Invalid value '"..tokens[1].."'!")
-        return true
+    if t == Types.boolean then
+        tool.digEnabled = v
+    else
+        printError("Invalid value type.")
     end
-    fuelmargin = math.floor(math.max(0,math.min(v,9999)))
     return true
 end
 
-states.starting.commands.digfilter = function(tokens)
+states.running.commands["suck"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.boolean then
+        tool.suckEnabled = v
+    else
+        printError("Invalid value type.")
+    end
+    return true
+end
+
+-- Might keep, might remove, still debating
+states.running.commands["tooldir"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.movement then
+        if v ~= Movement.back then
+            tool.tooldir = v
+        else
+            printError("Invalid direction value.")
+        end
+    else
+        printError("Invalid value type.")
+    end
+    return true
+end
+
+states.running.commands["dump"] = function(tokens)
+    -- Need a proper item management solution before I can do anything with this.
+end
+
+states.running.commands["home"] = function(tokens)
+    tCodeLine = tCodeLine + 1
+    changeState("topos",{ start = {
+        target = loc.home
+    }, stop = {}})
+end
+
+states.running.commands["pos"] = function(tokens)
+    local xt, xv = parseValue(tokens[1])
+    local yt, yv = parseValue(tokens[2])
+    local zt, zv = parseValue(tokens[3])
+    if xt ~= Types.number or yt ~= Types.number or zt ~= Types.number then
+        printError("Invalid value types.")
+    else
+        tCodeLine = tCodeLine + 1
+        changeState("topos",{ start = {
+            target = vector.new(xv,yv,zv)
+        }, stop = {}})
+    end
+end
+
+states.running.commands["look"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t ~= Types.direction then
+        printError("Invalid value type.")
+    else
+        -- Rotations can be hard. Once our implementation is better, lets fill this in.
+    end
+end
+
+states.running.commands["label"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.text then
+        vars.labels[v] = tCodeLine
+    else
+        printError("Invalid value type.")
+    end
+    return true
+end
+
+states.running.commands["goto"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.text then
+        if vars.labels[v] ~= nil then
+            tCodeLine = vars.labels[v]
+        else
+            printError("Invalid label '"..v.."'.")
+        end
+    elseif t == Types.number then
+        if v > vars.startLine and v <= #tCode then
+            tCodeLine = v
+        else
+            printError("Cannot goto line "..v..", out of bounds.")
+        end
+    else
+        printError("Invalid value type.")
+    end
+    return true
+end
+
+states.running.commands["if"] = function(tokens)
+    local at, av = parseValue(tokens[1]) -- First value
+    local bt, bv = parseValue(tokens[3]) -- Second value
+    local et, ev = parseValue(tokens[2]) -- Expression
+    if at == nil or bt == nil or et == nil then 
+        printError("Invalid arguments.")
+        return true
+    end
+    if at ~= bt then
+        printError("Cannot compare values of differing types.")
+        return true
+    end
+    if et == Types.text then
+        local result = nil
+        if ev == "=" then
+            result = av == bv
+        elseif ev == "!=" then
+            result = av ~= bv
+        elseif ev == ">" then
+            if at == Types.text then
+                printError("Cannot use expression '"..ev.."' with text.")
+                return true
+            end
+            result = av > bv
+        elseif ev == "<" then
+            if at == Types.text then
+                printError("Cannot use expression '"..ev.."' with text.")
+                return true
+            end
+            result = av < bv
+        elseif ev == ">=" then
+            if at == Types.text then
+                printError("Cannot use expression '"..ev.."' with text.")
+                return true
+            end
+            result = av >= bv
+        elseif ev == "<=" then
+            if at == Types.text then
+                printError("Cannot use expression '"..ev.."' with text.")
+                return true
+            end
+            result = av <= bv
+        else
+            printError("Invalid expression.")
+            return true
+        end
+        
+        if result then
+            local command = ""
+            for i=4, #tokens, 1 do
+                command = command..tokens[i].." "
+            end
+            return parseLine(command)
+        end
+
+    else
+        printError("Invalid expression value type.")
+        return true
+    end
+end
+
+states.running.commands["var"] = function(tokens)
+    local ot, ov = parseValue(tokens[1]) -- Variable operation
+    local nt, nv = paresValue(tokens[2]) -- Variable name
+    local t, v = parseValue(tokens[3]) -- Value
+    if ot == nil or nt == nil or t == nil then 
+        printError("Invalid arguments.")
+        return true
+    end
+    -- Fill this part in!
+    return true
+end
+
+-- This command was made on a whim for testing, but I kind of like it. Might keep it.
+states.running.commands["print"] = function(tokens)
+    local output = ""
+    for i, j in ipairs(tokens) do
+        local t, v = parseValue(j)
+        output = output..tostring(v).." "
+    end
+    print(output)
+    return true
+end
+
+states.running.commands["lowfuelreturn"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.boolean then
+        lowfuelreturn = v
+    else
+        error("Invalid value '"..tokens[1].."'!")
+    end
+    return true
+end
+
+states.running.commands["returnmethod"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.number then
+        returnmethod = math.floor(math.max(0,math.min(v,2)))
+    else
+        error("Invalid value '"..tokens[1].."'!")
+    end
+    return true
+end
+
+states.running.commands["fuelmargin"] = function(tokens)
+    local t, v = parseValue(tokens[1])
+    if t == Types.number then
+        fuelmargin = math.floor(math.max(0,math.min(v,9999)))
+    else
+        error("Invalid value '"..tokens[1].."'!")
+    end
+    return true
+end
+
+states.running.commands["digfilter"] = function(tokens)
     tCodeLine = tCodeLine + 1 -- increment line
     local line = tCode[tCodeLine]
     if line == nil then return false end
@@ -440,7 +759,7 @@ states.starting.commands.digfilter = function(tokens)
     return true
 end
 
-states.starting.commands.suckfilter = function(tokens)
+states.running.commands["suckfilter"] = function(tokens)
     tCodeLine = tCodeLine + 1 -- increment line
     local line = tCode[tCodeLine]
     if line == nil then return false end
@@ -464,123 +783,13 @@ states.starting.commands.suckfilter = function(tokens)
     return true
 end
 
-states.starting.commands._ = function(tokens)
-    tCodeLine = tCodeLine + 1
-    changeState("running")
+states.running.stop = function(args)
+    print("Running state stopping.")
 end
 
-states.starting.start = function(args)
-
-    --Clear console
-    term.clear()
-    term.setCursorPos(1,1)
-    print("[tCode v"..version.." by Zuwel]\n")
-
-    --Read and set the args appropriately
-    readArgs()
-
-    print("Loading tCode file \""..vars.args.filePath.."\"...")
-    if not loadFile() then
-        error("Failed to load file!")
-        changeState("failed")
-    end
-
-    tCodeLine = 1 -- Start from the top
-
-    -- Keep iterating through the header until the parser returns false (from header end or critical error)
-    while parseLine(tCode[tCodeLine]) and state=="starting" do
-        tCodeLine = tCodeLine + 1
-    end
-
+states.topos.start = function(args)
+    changeState(prevState) -- While we don't have any pathfinding logic, just shove the turtle back into the previous state
 end
-
-states.starting.stop = function(args)
-
-    if usegps then
-        local gpsPos, gpsHeading = gpsLocate()
-        loc.position = gpsPos
-        loc.xRotOffset = fmod(2-gpsHeading,4)
-    end
-
-    print("Finished reading file header!")
-
-end
-
-states.running.start = function(args)
-
-    -- Keep iterating through the header until the parser returns false (from header end or critical error)
-    while parseLine(tCode[tCodeLine]) and state=="running" do
-        tCodeLine = tCodeLine + 1
-        if tCodeLine > #tCode then changeState("completed") break end
-    end
-
-end
-
--- Turn all this into individual state command functions, this old garbage is gross.
---[[ local function states.running.execute(line)
-    
-    local tokens = splitTokens(line) -- split line into individual tokens
-
-    if #tokens < 1 then return end
-
-    print(line)
-    local key = tokens[1] -- retrieve the key token
-    local values = {}
-    for i=2, #tokens do
-        table.insert(values, tokens[i])
-    end
-
-    if key == "move" then
-        local dir = string.lower(values[1])
-        if dir == "f" or dir == "u" or dir == "b" or dir == "d" then
-            move(dir)
-            if #values > 1 then
-                local rep = tonumber(values[2])
-                if rep >= 1 and rep <= 1000 then
-                    readCommands(key.." "..dir.." "..tostring(rep-1))
-                end
-            end
-        else
-            error("Invalid input '"..dir.."'!")
-        end
-    elseif key == "turn" then
-        local dir = string.lower(values[1])
-        if dir == "l" or dir == "r" then
-            turn(dir)
-            if #values > 1 then
-                local rep = tonumber(values[2])
-                if rep >= 1 and rep <= 1000 then
-                    parallel.waitForAll(readCommands(key.." "..dir.." "..tostring(rep-1)))
-                end
-            end
-        else
-            error("Invalid input '"..dir.."'!")
-        end
-    elseif key == "dig" then
-        local bool = string.lower(value[1])
-        if bool == "true" then
-            digEnabled = true
-        elseif bool == "false" then
-            digEnabled = false
-        else
-            error("Invalid value '"..bool.."'!")
-        end
-    elseif key == "suck" then
-        local bool = string.lower(value[1])
-        if bool == "true" then
-            suckEnabled = true
-        elseif bool == "false" then
-            suckEnabled = false
-        else
-            error("Invalid value '"..bool.."'!")
-        end
-    else
-        error("Invalid tCode command '"..line.."'!")
-    end
-
-    return
-
-end ]]
 
 states.failed.start = function(args)
     print("Failed")
@@ -592,5 +801,3 @@ end
 
 -- Start the program
 changeState("starting")
-
-print("Finished.")
