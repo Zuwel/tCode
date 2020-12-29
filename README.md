@@ -29,8 +29,9 @@
     - [WIP] look (north/south/east/west) - turns the turtle to face the specified rotation, using gps heading if possible or relative rotation.
     - label <text> - a label which references a line position within the tCode file
     - goto <text, number> - skips the execution back to a specified label within the tCode file
-    - if (value) (=/!=/>/</>=/<=) (value) (command) (args) checks if the comparison is true; if so, it will run the command specified. [if commands can be chained]
-    - [WIP] var (set/unset/add/sub/mult/div) (name) (value) sets user variable which can be referenced in tcode with "#<name>"
+    - if (value) (=/!=/>/</>=/<=) (value) (command) (args) - checks if the comparison is true; if so, it will run the command specified. [if commands can be chained]
+    - [WIP] var (set/unset/add/sub/mult/div) (name) (value) - sets user variable which can be referenced in tcode with "#<name>"
+    - print (array) - prints out a single string of parsed values to the console
     - [WIP] usegps (bool) - if the turtle should use gps
     - [WIP] lowfuelreturn (bool) - if the turtle should automatically return home if it only has the fuel required (plus margin) to return home
     - [WIP] returnmethod (integer) - the method in which the turtle returns home, either by traceback (0), direct path (1), or rise and return (2)
